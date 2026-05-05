@@ -1079,8 +1079,9 @@ export default function App() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [user,        setUser]       = useState(null);
   const [loadingAuth, setLoadingAuth]= useState(true);
-  const syncReady  = useRef(false);  // true after Supabase data loaded; prevents saving stale data
-  const wsLoadRef  = useRef(null);   // tracks which workspace is being loaded to discard stale responses
+  const syncReady   = useRef(false); // true after Supabase data loaded; prevents saving stale data
+  const wsLoadRef   = useRef(null);  // tracks which workspace is being loaded to discard stale responses
+  const skipSaveRef = useRef(false); // true when state was set by realtime (not user) — prevents echo loop
 
   // ── App state ─────────────────────────────────────────────────────────────
   const [workspaces,  setWorkspaces]  = useState(()=>load(SK_GLOBAL.workspaces, DEFAULT_WORKSPACES));
@@ -1237,6 +1238,7 @@ export default function App() {
         if (payload.new.user_id !== ownerUid) return;
         if (payload.new.updated_at === payload.old?.updated_at) return;
         const d = payload.new;
+        skipSaveRef.current = true; // data came from DB — don't echo it back
         setTransactions(d.transactions || []);
         setFixedExpenses(d.fixed_expenses || DEFAULT_FX);
         setBudgets(d.budgets || {});
@@ -1340,6 +1342,7 @@ export default function App() {
     if (!user) return;
     const timer = setTimeout(()=>{
       if (!syncReady.current) return;
+      if (skipSaveRef.current) { skipSaveRef.current = false; return; } // realtime echo — skip
       supabase.from("workspace_data").upsert(
         {
           workspace_id: activeWsId,
@@ -1367,12 +1370,17 @@ export default function App() {
   const toastTimer = useRef(null);
   const showToast = useCallback((msg,type="success")=>{ clearTimeout(toastTimer.current); setToast({msg,type}); toastTimer.current=setTimeout(()=>setToast(null),2500); },[]);
 
+  // User-action wrappers: reset skipSaveRef so the debounced save fires after real changes
+  const txSet = useCallback(fn=>{ skipSaveRef.current=false; setTransactions(fn); },[]);
+  const fxSet = useCallback(fn=>{ skipSaveRef.current=false; setFixedExpenses(fn); },[]);
+  const bgSet = useCallback(fn=>{ skipSaveRef.current=false; setBudgets(fn); },[]);
+
   const onSubmit = useCallback(()=>{
     if (!input.trim()) return;
     const tx = parseInput(input,forceType);
     if (!tx) { showToast("No pude detectar el monto. Ej: 'uber 3500'","error"); return; }
     const final = { ...tx, ...(tx.type==="expense"?{priority:pendingPriority||null}:{}), ...(pendingNote.trim()?{note:pendingNote.trim()}:{}), createdBy:user.email };
-    setTransactions(p=>[final,...p]);
+    txSet(p=>[final,...p]);
     setInput(""); setForceType(null); setPendingPriority(null); setPendingNote("");
     showToast(final.type==="income"?`✅ Ingreso: ${fmt(final.amount)}`:`✅ Gasto: ${fmt(final.amount)}`);
     requestAnimationFrame(()=>inputRef.current?.focus());
@@ -1485,12 +1493,12 @@ export default function App() {
 
       {/* Content */}
       <div style={{ flex:1, paddingTop:"16px", paddingLeft:"16px", paddingRight:"16px", paddingBottom:"calc(80px + env(safe-area-inset-bottom))", overflowY:"auto" }}>
-        {activeTab==="home"     && <HomeTab inputRef={inputRef} input={input} setInput={setInput} onSubmit={onSubmit} parsePreview={parsePreview} forceType={forceType} setForceType={setForceType} pendingPriority={pendingPriority} setPendingPriority={setPendingPriority} pendingNote={pendingNote} setPendingNote={setPendingNote} transactions={transactions} setTransactions={setTransactions} setEditTx={setEditTx} todayExp={todayExp} monthExp={monthExp} monthInc={monthInc} balance={balance} totalFixed={totalFixed} disponible={disponible} projected={projected} daysInMonth={daysInMonth} dayOfMonth={dayOfMonth} showEomBanner={showEomBanner} onExportBackup={handleExport} onDismissBanner={handleDismiss} budgets={budgets} />}
-        {activeTab==="history"  && <HistoryTab transactions={transactions} setTransactions={setTransactions} setEditTx={setEditTx} period={period} setPeriod={setPeriod} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} />}
-        {activeTab==="fixed"    && <FixedTab fixedExpenses={fixedExpenses} setFixedExpenses={setFixedExpenses} totalFixed={totalFixed} monthInc={monthInc} showToast={showToast} />}
-        {activeTab==="budgets"  && <BudgetsTab budgets={budgets} setBudgets={setBudgets} transactions={transactions} showToast={showToast} />}
+        {activeTab==="home"     && <HomeTab inputRef={inputRef} input={input} setInput={setInput} onSubmit={onSubmit} parsePreview={parsePreview} forceType={forceType} setForceType={setForceType} pendingPriority={pendingPriority} setPendingPriority={setPendingPriority} pendingNote={pendingNote} setPendingNote={setPendingNote} transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} todayExp={todayExp} monthExp={monthExp} monthInc={monthInc} balance={balance} totalFixed={totalFixed} disponible={disponible} projected={projected} daysInMonth={daysInMonth} dayOfMonth={dayOfMonth} showEomBanner={showEomBanner} onExportBackup={handleExport} onDismissBanner={handleDismiss} budgets={budgets} />}
+        {activeTab==="history"  && <HistoryTab transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} period={period} setPeriod={setPeriod} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} />}
+        {activeTab==="fixed"    && <FixedTab fixedExpenses={fixedExpenses} setFixedExpenses={fxSet} totalFixed={totalFixed} monthInc={monthInc} showToast={showToast} />}
+        {activeTab==="budgets"  && <BudgetsTab budgets={budgets} setBudgets={bgSet} transactions={transactions} showToast={showToast} />}
         {activeTab==="insights" && <InsightsTab transactions={transactions} monthExp={monthExp} monthInc={monthInc} catBreakdown={catBreakdown} projected={projected} dayOfMonth={dayOfMonth} daysInMonth={daysInMonth} />}
-        {activeTab==="settings" && <SettingsTab transactions={transactions} fixedExpenses={fixedExpenses} budgets={budgets} setTransactions={setTransactions} setFixedExpenses={setFixedExpenses} setBudgets={setBudgets} lastBackup={lastBackup} setLastBackup={setLastBackup} showToast={showToast} activeWs={activeWsId} wsName={activeWs.name} onLogout={handleLogout} userEmail={user.email} />}
+        {activeTab==="settings" && <SettingsTab transactions={transactions} fixedExpenses={fixedExpenses} budgets={budgets} setTransactions={txSet} setFixedExpenses={fxSet} setBudgets={bgSet} lastBackup={lastBackup} setLastBackup={setLastBackup} showToast={showToast} activeWs={activeWsId} wsName={activeWs.name} onLogout={handleLogout} userEmail={user.email} />}
       </div>
 
       {/* Bottom nav */}
@@ -1507,7 +1515,7 @@ export default function App() {
       {toast && <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
 
       {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} onLeave={handleLeaveWs} userId={user.id} sharedWsIds={sharedWsIds} />}
-      {editTx && <EditModal tx={editTx} onSave={tx=>{setTransactions(p=>p.map(t=>t.id===tx.id?{...tx,editedBy:user.email,editedAt:new Date().toISOString()}:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
+      {editTx && <EditModal tx={editTx} onSave={tx=>{txSet(p=>p.map(t=>t.id===tx.id?{...tx,editedBy:user.email,editedAt:new Date().toISOString()}:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap');
