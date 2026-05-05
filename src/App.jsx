@@ -88,7 +88,14 @@ function parseInput(raw, forceType=null) {
   if (!text) return null;
   const nums = text.match(/\d[\d.,]*/g);
   if (!nums) return null;
-  const amount = parseFloat(nums[nums.length-1].replace(/\./g,"").replace(",","."));
+  const raw = nums[nums.length-1];
+  // Detect format: if last separator is "," treat as AR (1.500,50); if "." treat as decimal (1500.50)
+  const lastComma = raw.lastIndexOf(","), lastDot = raw.lastIndexOf(".");
+  const amount = parseFloat(
+    lastComma > lastDot
+      ? raw.replace(/\./g,"").replace(",",".")   // AR format: 1.500,50 → 1500.50
+      : raw.replace(/,/g,"")                     // plain or decimal dot: 1500.50 → 1500.50
+  );
   if (!amount||amount<=0) return null;
   const lc = text.toLowerCase();
   const isIncome = forceType==="income"||(forceType!=="expense"&&INCOME_KW.some(kw=>lc.includes(kw)));
@@ -1218,7 +1225,6 @@ export default function App() {
   // ── Realtime: sync workspace data changes from other users ───────────────
   useEffect(()=>{
     if (!user || !activeWsId) return;
-    const ownerUid = wsOwnersRef.current[activeWsId] ?? user.id;
     const channel = supabase
       .channel(`wsdata-${activeWsId}`)
       .on("postgres_changes", {
@@ -1227,6 +1233,7 @@ export default function App() {
         table: "workspace_data",
         filter: `workspace_id=eq.${activeWsId}`
       }, (payload) => {
+        const ownerUid = wsOwnersRef.current[activeWsId] ?? user.id;
         if (payload.new.user_id !== ownerUid) return;
         if (payload.new.updated_at === payload.old?.updated_at) return;
         const d = payload.new;
@@ -1239,7 +1246,7 @@ export default function App() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  },[user, activeWsId, wsOwners]);
+  },[user, activeWsId]);
 
   // ── Load workspace data from Supabase when user or workspace changes ──────
   useEffect(()=>{
@@ -1357,7 +1364,8 @@ export default function App() {
   },[activeTab]);
 
   const parsePreview = useMemo(()=>input.trim().length>=3?parseInput(input,forceType):null,[input,forceType]);
-  const showToast = useCallback((msg,type="success")=>{ setToast({msg,type}); setTimeout(()=>setToast(null),2500); },[]);
+  const toastTimer = useRef(null);
+  const showToast = useCallback((msg,type="success")=>{ clearTimeout(toastTimer.current); setToast({msg,type}); toastTimer.current=setTimeout(()=>setToast(null),2500); },[]);
 
   const onSubmit = useCallback(()=>{
     if (!input.trim()) return;
@@ -1368,7 +1376,7 @@ export default function App() {
     setInput(""); setForceType(null); setPendingPriority(null); setPendingNote("");
     showToast(final.type==="income"?`✅ Ingreso: ${fmt(final.amount)}`:`✅ Gasto: ${fmt(final.amount)}`);
     requestAnimationFrame(()=>inputRef.current?.focus());
-  },[input,forceType,pendingPriority,pendingNote,showToast]);
+  },[input,forceType,pendingPriority,pendingNote,showToast,user]);
 
   const handleCreateWs = useCallback(ws=>{
     setWorkspaces(p=>[...p,ws]);
@@ -1425,7 +1433,7 @@ export default function App() {
 
   const totalFixed = useMemo(()=>fixedExpenses.reduce((s,f)=>s+(f.amount||0),0),[fixedExpenses]);
   const balance=monthInc-monthExp, disponible=monthInc-totalFixed;
-  const [daysInMonth,dayOfMonth] = useMemo(()=>{ const now=new Date(); return [new Date(now.getFullYear(),now.getMonth()+1,0).getDate(),now.getDate()]; },[]);
+  const [daysInMonth,dayOfMonth] = useMemo(()=>{ const now=new Date(); return [new Date(now.getFullYear(),now.getMonth()+1,0).getDate(),now.getDate()]; },[transactions]);
   const projected = dayOfMonth>0?Math.round((monthExp/dayOfMonth)*daysInMonth):0;
 
   const catBreakdown = useMemo(()=>{
