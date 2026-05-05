@@ -1294,22 +1294,25 @@ export default function App() {
       if (wsLoadRef.current !== target) return; // stale response, discard
 
       if (data) {
-        const dbTx = data.transactions || [];
-        const dbFx = data.fixed_expenses || DEFAULT_FX;
-        const dbBg = data.budgets || {};
-        // Only overwrite localStorage if DB has actual data, or localStorage is also empty
-        const localTx = loadWs(target, "tx", []);
-        if (dbTx.length > 0 || localTx.length === 0) {
-          skipSaveRef.current = true; // data came from DB — don't save it back
-          setTransactions(dbTx);
-          setFixedExpenses(dbFx);
-          setBudgets(dbBg);
-          setLastBackupRaw(data.last_backup);
-          saveWs(target, "tx",         dbTx);
-          saveWs(target, "fx",         dbFx);
-          saveWs(target, "budgets",    dbBg);
-          saveWs(target, "lastBackup", data.last_backup);
-        }
+        const dbTx  = data.transactions    || [];
+        const dbFx  = data.fixed_expenses  || DEFAULT_FX;
+        const dbBg  = data.budgets         || {};
+        // Merge: local transactions not yet in DB (exited before debounce fired) are preserved
+        const localTx  = loadWs(target, "tx", []);
+        const dbIds    = new Set(dbTx.map(t => t.id));
+        const localNew = localTx.filter(t => !dbIds.has(t.id));
+        const merged   = localNew.length > 0
+          ? [...localNew, ...dbTx].sort((a,b) => new Date(b.date)-new Date(a.date))
+          : dbTx;
+        skipSaveRef.current = localNew.length === 0; // if we merged, we need to save merged to DB
+        setTransactions(merged);
+        setFixedExpenses(dbFx);
+        setBudgets(dbBg);
+        setLastBackupRaw(data.last_backup);
+        saveWs(target, "tx",         merged);
+        saveWs(target, "fx",         dbFx);
+        saveWs(target, "budgets",    dbBg);
+        saveWs(target, "lastBackup", data.last_backup);
       }
 
       syncReady.current = true;
