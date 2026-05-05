@@ -1225,6 +1225,15 @@ export default function App() {
         saveWs(target, "fx",         data.fixed_expenses || DEFAULT_FX);
         saveWs(target, "budgets",    data.budgets        || {});
         saveWs(target, "lastBackup", data.last_backup);
+      } else if (ownerUid === user.id) {
+        // No DB data yet — bootstrap from localStorage so other devices/collaborators can load it
+        const localTx      = loadWs(target, "tx",      []);
+        const localFx      = loadWs(target, "fx",      DEFAULT_FX);
+        const localBudgets = loadWs(target, "budgets", {});
+        await supabase.from("workspace_data").upsert(
+          { workspace_id: target, user_id: ownerUid, transactions: localTx, fixed_expenses: localFx, budgets: localBudgets },
+          { onConflict: "workspace_id,user_id" }
+        );
       }
 
       syncReady.current = true;
