@@ -1179,11 +1179,16 @@ export default function App() {
           .in("workspace_id", ownIds).eq("user_id", user.id);
         const inDB = new Set(existing?.map(d => d.workspace_id) || []);
         for (const ws of all.filter(w => !sharedIds.has(w.id) && !inDB.has(w.id))) {
+          const txData  = loadWs(ws.id, "tx",      []);
+          const fxData  = loadWs(ws.id, "fx",      DEFAULT_FX);
+          const bgData  = loadWs(ws.id, "budgets", {});
+          // Only bootstrap if there's actual data — never upload empty data to DB
+          if (txData.length === 0 && Object.keys(bgData).length === 0) continue;
           await supabase.from("workspace_data").upsert(
             { workspace_id: ws.id, user_id: user.id,
-              transactions:   loadWs(ws.id, "tx",      []),
-              fixed_expenses: loadWs(ws.id, "fx",      DEFAULT_FX),
-              budgets:        loadWs(ws.id, "budgets", {}) },
+              transactions:   txData,
+              fixed_expenses: fxData,
+              budgets:        bgData },
             { onConflict: "workspace_id,user_id" }
           );
         }
@@ -1272,15 +1277,22 @@ export default function App() {
       if (wsLoadRef.current !== target) return; // stale response, discard
 
       if (data) {
-        skipSaveRef.current = true; // data came from DB — don't save it back
-        setTransactions(data.transactions || []);
-        setFixedExpenses(data.fixed_expenses || DEFAULT_FX);
-        setBudgets(data.budgets || {});
-        setLastBackupRaw(data.last_backup);
-        saveWs(target, "tx",         data.transactions   || []);
-        saveWs(target, "fx",         data.fixed_expenses || DEFAULT_FX);
-        saveWs(target, "budgets",    data.budgets        || {});
-        saveWs(target, "lastBackup", data.last_backup);
+        const dbTx = data.transactions || [];
+        const dbFx = data.fixed_expenses || DEFAULT_FX;
+        const dbBg = data.budgets || {};
+        // Only overwrite localStorage if DB has actual data, or localStorage is also empty
+        const localTx = loadWs(target, "tx", []);
+        if (dbTx.length > 0 || localTx.length === 0) {
+          skipSaveRef.current = true; // data came from DB — don't save it back
+          setTransactions(dbTx);
+          setFixedExpenses(dbFx);
+          setBudgets(dbBg);
+          setLastBackupRaw(data.last_backup);
+          saveWs(target, "tx",         dbTx);
+          saveWs(target, "fx",         dbFx);
+          saveWs(target, "budgets",    dbBg);
+          saveWs(target, "lastBackup", data.last_backup);
+        }
       }
 
       syncReady.current = true;
