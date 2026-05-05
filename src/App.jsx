@@ -1174,6 +1174,11 @@ export default function App() {
           owners[lw.id] = user.id;
         }
       }
+      // "personal" is undeletable — always ensure it exists
+      if (!all.some(w => w.id === "personal")) {
+        all.unshift(DEFAULT_WORKSPACES[0]);
+        owners["personal"] = user.id;
+      }
 
       if (all.length) { setWorkspaces(all); save(SK_GLOBAL.workspaces, all); }
       wsOwnersRef.current    = owners;
