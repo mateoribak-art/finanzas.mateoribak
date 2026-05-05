@@ -375,39 +375,135 @@ function PriorityPicker({ value, onChange }) {
 }
 
 // ─── WORKSPACE MODAL ─────────────────────────────────────────────────────────
-function WorkspaceModal({ workspaces, activeId, onSelect, onClose, onCreate, onDelete }) {
-  const [creating, setCreating] = useState(false);
-  const [newName,  setNewName]  = useState("");
-  const [newEmoji, setNewEmoji] = useState("💼");
+function WorkspaceModal({ workspaces, activeId, onSelect, onClose, onCreate, onDelete, onLeave, userId, sharedWsIds }) {
+  const [creating,      setCreating]      = useState(false);
+  const [newName,       setNewName]       = useState("");
+  const [newEmoji,      setNewEmoji]      = useState("💼");
+  const [shareWsId,     setShareWsId]     = useState(null);
+  const [members,       setMembers]       = useState([]);
+  const [inviteEmail,   setInviteEmail]   = useState("");
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteMsg,     setInviteMsg]     = useState(null);
+
   const EMOJIS = ["💼","🎵","🎤","🎸","🎹","🎬","📽️","🏢","🏪","🚀","⚽","🎮","💡","🌟","🔥"];
   const counts = useMemo(()=>{
     const m={};
     workspaces.forEach(ws=>{ try{m[ws.id]=(JSON.parse(localStorage.getItem(wsKey(ws.id,"tx"))||"[]")).length;}catch{m[ws.id]=0;} });
     return m;
   },[workspaces]);
+
+  useEffect(()=>{
+    if (!shareWsId) { setMembers([]); setInviteMsg(null); return; }
+    supabase.from("workspace_members").select("id, invited_email, member_user_id")
+      .eq("workspace_id", shareWsId).then(({data})=>setMembers(data||[]));
+  },[shareWsId]);
+
+  const reloadMembers = async () => {
+    const {data} = await supabase.from("workspace_members").select("id, invited_email, member_user_id").eq("workspace_id", shareWsId);
+    setMembers(data||[]);
+  };
+
+  const handleInvite = async () => {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email) return;
+    setInviteLoading(true); setInviteMsg(null);
+    const { error } = await supabase.from("workspace_members").upsert(
+      { workspace_id: shareWsId, owner_user_id: userId, invited_email: email },
+      { onConflict: "workspace_id,owner_user_id,invited_email" }
+    );
+    if (error) {
+      setInviteMsg({ text:"Error al invitar. Intentá de nuevo.", type:"error" });
+    } else {
+      setInviteMsg({ text:`✅ Invitación enviada a ${email}. Cuando inicie sesión va a ver el workspace automáticamente.`, type:"success" });
+      setInviteEmail("");
+      await reloadMembers();
+    }
+    setInviteLoading(false);
+  };
+
+  const handleRemoveMember = async id => {
+    await supabase.from("workspace_members").delete().eq("id", id);
+    setMembers(p=>p.filter(m=>m.id!==id));
+  };
+
   const handleCreate = () => {
     if (!newName.trim()) return;
     onCreate({ id:crypto.randomUUID(), name:newName.trim(), emoji:newEmoji, createdAt:new Date().toISOString() });
     setCreating(false); setNewName(""); setNewEmoji("💼");
   };
+
   return (
     <div style={{ position:"fixed", inset:0, background:"#00000099", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={onClose}>
-      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, paddingBottom:"calc(20px + env(safe-area-inset-bottom))", width:"100%", maxWidth:480, maxHeight:"80vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, paddingBottom:"calc(20px + env(safe-area-inset-bottom))", width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
           <div style={{ fontSize:15, fontWeight:800, color:C.text }}>Mis economías</div>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:C.muted, fontSize:20 }}>×</button>
         </div>
-        {workspaces.map(ws=>(
-          <div key={ws.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:12, marginBottom:8, background:ws.id===activeId?C.aGlow:C.surface2, border:`1px solid ${ws.id===activeId?C.accent:C.border}`, cursor:"pointer" }} onClick={()=>{onSelect(ws.id);onClose();}}>
-            <div style={{ fontSize:22, width:40, height:40, borderRadius:12, background:C.surface, display:"flex", alignItems:"center", justifyContent:"center" }}>{ws.emoji}</div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:14, fontWeight:700, color:ws.id===activeId?"#a78bfa":C.text }}>{ws.name}</div>
-              <div style={{ fontSize:11, color:C.muted }}>{counts[ws.id]||0} movimientos</div>
+
+        {workspaces.map(ws=>{
+          const isShared  = sharedWsIds.has(ws.id);
+          const showShare = shareWsId === ws.id;
+          return (
+            <div key={ws.id} style={{ marginBottom: showShare ? 0 : 8 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius: showShare?"12px 12px 0 0":12, background:ws.id===activeId?C.aGlow:C.surface2, border:`1px solid ${ws.id===activeId?C.accent:C.border}`, borderBottom: showShare?"none":undefined, cursor:"pointer" }} onClick={()=>{onSelect(ws.id);onClose();}}>
+                <div style={{ fontSize:22, width:40, height:40, borderRadius:12, background:C.surface, display:"flex", alignItems:"center", justifyContent:"center" }}>{ws.emoji}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:14, fontWeight:700, color:ws.id===activeId?"#a78bfa":C.text }}>{ws.name}</span>
+                    {isShared && <span style={{ fontSize:10, background:"#1e3a5f", color:"#93c5fd", padding:"1px 6px", borderRadius:4, fontWeight:700 }}>👥 compartido</span>}
+                  </div>
+                  <div style={{ fontSize:11, color:C.muted }}>{counts[ws.id]||0} movimientos</div>
+                </div>
+                {ws.id===activeId && !isShared && <div style={{ fontSize:11, color:"#a78bfa", fontWeight:700, flexShrink:0 }}>activa</div>}
+                <div style={{ display:"flex", gap:4, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+                  {!isShared && ws.id!=="personal" && (
+                    <button onClick={()=>{ setShareWsId(showShare?null:ws.id); setInviteMsg(null); setInviteEmail(""); }}
+                      style={{...ABTN, fontSize:15, color: showShare?"#93c5fd":C.muted}} title="Compartir">👥</button>
+                  )}
+                  {!isShared && ws.id!=="personal" && (
+                    <button onClick={()=>{if(window.confirm(`¿Eliminar "${ws.name}"? Borra todos sus datos.`))onDelete(ws.id);}} style={{...ABTN,color:"#f87171",fontSize:14}}>🗑️</button>
+                  )}
+                  {isShared && (
+                    <button onClick={()=>{if(window.confirm(`¿Salir de "${ws.name}"?`)){onLeave(ws.id);onClose();}}} style={{...ABTN,color:"#f87171",fontSize:12}}>Salir</button>
+                  )}
+                </div>
+              </div>
+
+              {showShare && (
+                <div style={{ background:"#0a1628", border:`1px solid #1e3a5f`, borderTop:"none", borderRadius:"0 0 12px 12px", padding:"14px 16px", marginBottom:8 }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#93c5fd", marginBottom:12 }}>Colaboradores de {ws.name}</div>
+                  {members.length > 0 && (
+                    <div style={{ marginBottom:12 }}>
+                      {members.map(m=>(
+                        <div key={m.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:13, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{m.invited_email}</div>
+                            <div style={{ fontSize:10, color:m.member_user_id?"#4ade80":"#fbbf24", marginTop:2 }}>{m.member_user_id?"● Activo":"◌ Pendiente — no inició sesión aún"}</div>
+                          </div>
+                          <button onClick={()=>handleRemoveMember(m.id)} style={{...ABTN,color:"#f87171",fontSize:13}}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {members.length === 0 && <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Sin colaboradores todavía.</div>}
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input value={inviteEmail} onChange={e=>{setInviteEmail(e.target.value);setInviteMsg(null);}}
+                      onKeyDown={e=>e.key==="Enter"&&handleInvite()}
+                      placeholder="email del colaborador" type="email"
+                      style={{...IINPUT, flex:1, fontSize:13}} />
+                    <button onClick={handleInvite} disabled={inviteLoading||!inviteEmail}
+                      style={{ background:"#1e3a5f", border:"1px solid #3b82f6", borderRadius:10, padding:"8px 14px", color:"#93c5fd", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:C.font, opacity:inviteLoading||!inviteEmail?0.5:1, flexShrink:0 }}>
+                      {inviteLoading?"...":"Invitar"}
+                    </button>
+                  </div>
+                  {inviteMsg && <div style={{ marginTop:8, fontSize:12, color:inviteMsg.type==="error"?"#f87171":"#86efac", lineHeight:1.5 }}>{inviteMsg.text}</div>}
+                  <div style={{ marginTop:10, fontSize:11, color:C.muted, lineHeight:1.6 }}>El colaborador necesita tener cuenta en la app. Si no tiene, tiene que registrarse con ese email primero.</div>
+                </div>
+              )}
             </div>
-            {ws.id===activeId && <div style={{ fontSize:11, color:"#a78bfa", fontWeight:700 }}>activa</div>}
-            {ws.id!=="personal" && <button onClick={e=>{e.stopPropagation();if(window.confirm(`¿Eliminar "${ws.name}"? Borra todos sus datos.`))onDelete(ws.id);}} style={{...ABTN,color:"#f87171",fontSize:14}}>🗑️</button>}
-          </div>
-        ))}
+          );
+        })}
+
         {creating ? (
           <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ fontSize:12, color:C.muted, fontWeight:600 }}>Elegí un emoji</div>
@@ -974,8 +1070,12 @@ export default function App() {
   const [toast,        setToast]          = useState(null);
   const [pendingPriority, setPendingPriority] = useState(null);
   const [pendingNote,     setPendingNote]     = useState("");
-  const inputRef = useRef(null);
-  const prevTab  = useRef(null);
+  const inputRef       = useRef(null);
+  const prevTab        = useRef(null);
+  const wsOwnersRef    = useRef({});   // { wsId: ownerUserId } — sync access in effects
+  const sharedWsIdsRef = useRef(new Set()); // wsIds where user is member, not owner
+  const [wsOwners,    setWsOwners]    = useState({});
+  const [sharedWsIds, setSharedWsIds] = useState(new Set());
 
   const activeWs = workspaces.find(w=>w.id===activeWsId)||workspaces[0];
 
@@ -992,20 +1092,50 @@ export default function App() {
     return () => subscription.unsubscribe();
   },[]);
 
-  // ── Load workspaces from Supabase on login ────────────────────────────────
+  // ── Load workspaces + memberships from Supabase on login ────────────────────
   useEffect(()=>{
     if (!user) return;
     (async ()=>{
+      // Resolve pending invites for this email
+      await supabase.from("workspace_members")
+        .update({ member_user_id: user.id })
+        .eq("invited_email", user.email)
+        .is("member_user_id", null);
+
+      // Own workspaces
       const { data: wss } = await supabase
-        .from("workspaces")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at");
-      if (wss?.length) {
-        const mapped = wss.map(w=>({ id:w.id, name:w.name, emoji:w.emoji, createdAt:w.created_at }));
-        setWorkspaces(mapped);
-        save(SK_GLOBAL.workspaces, mapped);
+        .from("workspaces").select("*").eq("user_id", user.id).order("created_at");
+
+      // Shared workspaces (member)
+      const { data: memberships } = await supabase
+        .from("workspace_members").select("workspace_id, owner_user_id").eq("member_user_id", user.id);
+
+      const owners = {};
+      const sharedIds = new Set();
+      let all = wss?.length ? wss.map(w=>({ id:w.id, name:w.name, emoji:w.emoji, createdAt:w.created_at })) : [];
+      all.forEach(w=>{ owners[w.id] = user.id; });
+
+      if (memberships?.length) {
+        const sharedResults = await Promise.all(
+          memberships.map(m=>
+            supabase.from("workspaces").select("*")
+              .eq("id", m.workspace_id).eq("user_id", m.owner_user_id).maybeSingle()
+          )
+        );
+        sharedResults.forEach((r, i)=>{
+          if (!r.data) return;
+          const w = r.data, m = memberships[i];
+          all.push({ id:w.id, name:w.name, emoji:w.emoji, createdAt:w.created_at });
+          owners[w.id] = m.owner_user_id;
+          sharedIds.add(w.id);
+        });
       }
+
+      if (all.length) { setWorkspaces(all); save(SK_GLOBAL.workspaces, all); }
+      wsOwnersRef.current    = owners;
+      sharedWsIdsRef.current = sharedIds;
+      setWsOwners(owners);
+      setSharedWsIds(sharedIds);
     })();
   },[user]);
 
@@ -1017,10 +1147,11 @@ export default function App() {
     wsLoadRef.current = target;
 
     (async ()=>{
+      const ownerUid = wsOwnersRef.current[target] ?? user.id;
       const { data } = await supabase
         .from("workspace_data")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", ownerUid)
         .eq("workspace_id", target)
         .maybeSingle();
 
@@ -1042,6 +1173,31 @@ export default function App() {
     })();
   },[user, activeWsId]);
 
+  // ── When wsOwners resolves, reload shared workspace data with correct ownerUid
+  useEffect(()=>{
+    const ownerUid = wsOwners[activeWsId];
+    if (!ownerUid || !user || ownerUid === user.id) return;
+    syncReady.current = false;
+    wsLoadRef.current = activeWsId;
+    const target = activeWsId;
+    (async ()=>{
+      const { data } = await supabase.from("workspace_data").select("*")
+        .eq("user_id", ownerUid).eq("workspace_id", target).maybeSingle();
+      if (wsLoadRef.current !== target) return;
+      if (data) {
+        setTransactions(data.transactions || []);
+        setFixedExpenses(data.fixed_expenses || DEFAULT_FX);
+        setBudgets(data.budgets || {});
+        setLastBackupRaw(data.last_backup);
+        saveWs(target,"tx",data.transactions||[]);
+        saveWs(target,"fx",data.fixed_expenses||DEFAULT_FX);
+        saveWs(target,"budgets",data.budgets||{});
+        saveWs(target,"lastBackup",data.last_backup);
+      }
+      syncReady.current = true;
+    })();
+  },[wsOwners, activeWsId, user]);
+
   // ── Workspace switch: reset from localStorage immediately ─────────────────
   useEffect(()=>{
     setTransactions(loadWs(activeWsId,"tx",[]));
@@ -1059,10 +1215,10 @@ export default function App() {
   useEffect(()=>{ save(SK_GLOBAL.workspaces,workspaces); },[workspaces]);
   useEffect(()=>{ save(SK_GLOBAL.activeWs,activeWsId); },[activeWsId]);
 
-  // ── Sync workspace list to Supabase ───────────────────────────────────────
+  // ── Sync workspace list to Supabase (only own workspaces) ────────────────
   useEffect(()=>{
     if (!user || !syncReady.current) return;
-    workspaces.forEach(ws=>{
+    workspaces.filter(ws=>!sharedWsIdsRef.current.has(ws.id)).forEach(ws=>{
       supabase.from("workspaces").upsert(
         { id:ws.id, user_id:user.id, name:ws.name, emoji:ws.emoji, created_at:ws.createdAt },
         { onConflict:"id,user_id" }
@@ -1078,7 +1234,7 @@ export default function App() {
       supabase.from("workspace_data").upsert(
         {
           workspace_id: activeWsId,
-          user_id:      user.id,
+          user_id:      wsOwnersRef.current[activeWsId] ?? user.id,
           transactions,
           fixed_expenses: fixedExpenses,
           budgets,
@@ -1130,6 +1286,16 @@ export default function App() {
       supabase.from("workspaces").delete().match({ id:wsId, user_id:user.id });
       supabase.from("workspace_data").delete().match({ workspace_id:wsId, user_id:user.id });
     }
+  },[activeWsId, user]);
+
+  const handleLeaveWs = useCallback(wsId=>{
+    setWorkspaces(p=>p.filter(w=>w.id!==wsId));
+    if (activeWsId===wsId) setActiveWsId("personal");
+    setWsOwners(p=>{ const n={...p}; delete n[wsId]; return n; });
+    setSharedWsIds(p=>{ const n=new Set(p); n.delete(wsId); return n; });
+    delete wsOwnersRef.current[wsId];
+    sharedWsIdsRef.current.delete(wsId);
+    if (user) supabase.from("workspace_members").delete().eq("workspace_id",wsId).eq("member_user_id",user.id);
   },[activeWsId, user]);
 
   const handleLogout = useCallback(async ()=>{
@@ -1191,7 +1357,10 @@ export default function App() {
         <button onClick={()=>setShowWsModal(true)} style={{ display:"flex", alignItems:"center", gap:8, background:"none", border:"none", cursor:"pointer", padding:0 }}>
           <div style={{ width:32, height:32, borderRadius:10, background:C.surface2, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>{activeWs.emoji}</div>
           <div style={{ textAlign:"left" }}>
-            <div style={{ fontSize:14, fontWeight:800, color:C.text, letterSpacing:"-0.02em", lineHeight:1.2 }}>{activeWs.name}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <span style={{ fontSize:14, fontWeight:800, color:C.text, letterSpacing:"-0.02em", lineHeight:1.2 }}>{activeWs.name}</span>
+                {sharedWsIds.has(activeWsId) && <span style={{ fontSize:10, color:"#93c5fd" }}>👥</span>}
+              </div>
             <div style={{ fontSize:10, color:C.muted }}>{new Date().toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"})}</div>
           </div>
           <span style={{ fontSize:10, color:C.muted, marginLeft:2 }}>▾</span>
@@ -1227,7 +1396,7 @@ export default function App() {
       {/* Toast */}
       {toast && <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
 
-      {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} />}
+      {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} onLeave={handleLeaveWs} userId={user.id} sharedWsIds={sharedWsIds} />}
       {editTx && <EditModal tx={editTx} onSave={tx=>{setTransactions(p=>p.map(t=>t.id===tx.id?tx:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
 
       <style>{`
