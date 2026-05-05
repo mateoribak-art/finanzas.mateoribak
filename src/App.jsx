@@ -1165,6 +1165,16 @@ export default function App() {
         });
       }
 
+      // Always preserve local-only own workspaces (e.g. "personal") that aren't in DB yet
+      const allIds = new Set(all.map(w => w.id));
+      const localWs = load(SK_GLOBAL.workspaces, DEFAULT_WORKSPACES);
+      for (const lw of localWs) {
+        if (!allIds.has(lw.id) && !sharedIds.has(lw.id)) {
+          all.unshift(lw);
+          owners[lw.id] = user.id;
+        }
+      }
+
       if (all.length) { setWorkspaces(all); save(SK_GLOBAL.workspaces, all); }
       wsOwnersRef.current    = owners;
       sharedWsIdsRef.current = sharedIds;
