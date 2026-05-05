@@ -624,7 +624,7 @@ function EomBanner({ onExport, onDismiss }) {
 }
 
 // ─── TAB: HOME ───────────────────────────────────────────────────────────────
-function HomeTab({ inputRef, input, setInput, onSubmit, parsePreview, forceType, setForceType, pendingPriority, setPendingPriority, pendingNote, setPendingNote, transactions, setTransactions, setEditTx, todayExp, monthExp, monthInc, balance, totalFixed, disponible, projected, daysInMonth, dayOfMonth, showEomBanner, onExportBackup, onDismissBanner, budgets }) {
+function HomeTab({ inputRef, input, setInput, onSubmit, parsePreview, forceType, setForceType, pendingPriority, setPendingPriority, pendingNote, setPendingNote, transactions, setTransactions, setEditTx, todayExp, monthExp, monthInc, balance, totalFixed, disponible, projected, daysInMonth, dayOfMonth, showEomBanner, onExportBackup, onDismissBanner, budgets, showToast }) {
   const isIncome = forceType==="income"||(forceType!=="expense"&&parsePreview?.type==="income");
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
@@ -704,7 +704,7 @@ function HomeTab({ inputRef, input, setInput, onSubmit, parsePreview, forceType,
           <div style={{...CARD, padding:"0 0 0 0", overflow:"hidden"}}>
             {transactions.slice(0,5).map(tx=>(
               <div key={tx.id} style={{ paddingLeft:18, paddingRight:0 }}>
-                <TxItem tx={tx} onDelete={id=>setTransactions(p=>p.filter(t=>t.id!==id))} onEdit={setEditTx} />
+                <TxItem tx={tx} onDelete={id=>{ const t=transactions.find(x=>x.id===id); setTransactions(p=>p.filter(x=>x.id!==id)); if(t) showToast("Eliminado","error",{label:"Deshacer",fn:()=>setTransactions(p=>[t,...p])}); }} onEdit={setEditTx} />
               </div>
             ))}
           </div>
@@ -715,7 +715,7 @@ function HomeTab({ inputRef, input, setInput, onSubmit, parsePreview, forceType,
 }
 
 // ─── TAB: HISTORY ────────────────────────────────────────────────────────────
-function HistoryTab({ transactions, setTransactions, setEditTx, period, setPeriod, filterCat, setFilterCat, filtered }) {
+function HistoryTab({ transactions, setTransactions, setEditTx, period, setPeriod, filterCat, setFilterCat, filtered, showToast }) {
   const [filterPriority, setFilterPriority] = useState("all");
   const filteredFinal = useMemo(()=>filterPriority==="all"?filtered:filtered.filter(t=>t.priority===filterPriority),[filtered,filterPriority]);
   const cats = useMemo(()=>[...new Set(transactions.map(t=>t.category))],[transactions]);
@@ -750,7 +750,7 @@ function HistoryTab({ transactions, setTransactions, setEditTx, period, setPerio
           ? <div style={{ padding:"24px 0", textAlign:"center", color:C.muted, fontSize:14 }}>Sin movimientos</div>
           : filteredFinal.map(tx=>(
               <div key={tx.id} style={{ paddingLeft:18, paddingRight:0 }}>
-                <TxItem tx={tx} onDelete={id=>setTransactions(p=>p.filter(t=>t.id!==id))} onEdit={setEditTx} />
+                <TxItem tx={tx} onDelete={id=>{ const t=transactions.find(x=>x.id===id); setTransactions(p=>p.filter(x=>x.id!==id)); if(t) showToast("Eliminado","error",{label:"Deshacer",fn:()=>setTransactions(p=>[t,...p])}); }} onEdit={setEditTx} />
               </div>
             ))
         }
@@ -1110,6 +1110,8 @@ export default function App() {
   const sharedWsIdsRef = useRef(new Set()); // wsIds where user is member, not owner
   const [wsOwners,    setWsOwners]    = useState({});
   const [sharedWsIds, setSharedWsIds] = useState(new Set());
+  const [wsReady,     setWsReady]     = useState(false);  // true after workspace DB data loaded
+  const [isSyncing,   setIsSyncing]   = useState(false);  // true while debounced save is in-flight
 
   const activeWs = workspaces.find(w=>w.id===activeWsId)||workspaces[0];
 
@@ -1311,6 +1313,7 @@ export default function App() {
       }
 
       syncReady.current = true;
+      setWsReady(true);
     })();
   },[user, activeWsId]);
 
@@ -1337,11 +1340,13 @@ export default function App() {
         saveWs(target,"lastBackup",data.last_backup);
       }
       syncReady.current = true;
+      setWsReady(true);
     })();
   },[wsOwners, activeWsId, user]);
 
   // ── Workspace switch: reset from localStorage immediately ─────────────────
   useEffect(()=>{
+    setWsReady(false);
     setTransactions(loadWs(activeWsId,"tx",[]));
     setFixedExpenses(loadWs(activeWsId,"fx",DEFAULT_FX));
     setBudgets(loadWs(activeWsId,"budgets",{}));
@@ -1357,6 +1362,26 @@ export default function App() {
   useEffect(()=>{ save(SK_GLOBAL.workspaces,workspaces); },[workspaces]);
   useEffect(()=>{ save(SK_GLOBAL.activeWs,activeWsId); },[activeWsId]);
 
+  // ── Auto-register fixed expenses at start of each month ──────────────────
+  useEffect(()=>{
+    if (!wsReady || !user) return;
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const regKey   = wsKey(activeWsId, `autoReg_${monthKey}`);
+    const alreadyReg = new Set(load(regKey, []));
+    const toReg = fixedExpenses.filter(f => f.autoRegister && f.amount > 0 && !alreadyReg.has(f.id));
+    if (!toReg.length) return;
+    const newTxs = toReg.map(f => ({
+      id: crypto.randomUUID(), type:"expense", amount:f.amount,
+      description:f.name, category:detectCat(f.name),
+      date:new Date().toISOString(), note:"Registro automático",
+      createdBy:user.email, autoRegistered:f.id,
+    }));
+    txSet(p => [...newTxs, ...p]);
+    save(regKey, [...alreadyReg, ...toReg.map(f => f.id)]);
+    showToast(`✅ ${toReg.length} gasto${toReg.length>1?"s":""} fijo${toReg.length>1?"s":""} registrado${toReg.length>1?"s":""} automáticamente`);
+  },[wsReady, activeWsId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Sync workspace list to Supabase (only own workspaces) ────────────────
   useEffect(()=>{
     if (!user) return;
@@ -1371,10 +1396,11 @@ export default function App() {
   // ── Debounced save of workspace data to Supabase ──────────────────────────
   useEffect(()=>{
     if (!user) return;
-    const timer = setTimeout(()=>{
+    const timer = setTimeout(async ()=>{
       if (!syncReady.current) return;
       if (skipSaveRef.current) { skipSaveRef.current = false; return; } // realtime echo — skip
-      supabase.from("workspace_data").upsert(
+      setIsSyncing(true);
+      const { error } = await supabase.from("workspace_data").upsert(
         {
           workspace_id: activeWsId,
           user_id:      wsOwnersRef.current[activeWsId] ?? user.id,
@@ -1386,6 +1412,8 @@ export default function App() {
         },
         { onConflict:"workspace_id,user_id" }
       );
+      if (error) console.error("Sync error:", error);
+      setIsSyncing(false);
     }, 1500);
     return () => clearTimeout(timer);
   },[transactions, fixedExpenses, budgets, lastBackup, activeWsId, user]);
@@ -1399,7 +1427,7 @@ export default function App() {
 
   const parsePreview = useMemo(()=>input.trim().length>=3?parseInput(input,forceType):null,[input,forceType]);
   const toastTimer = useRef(null);
-  const showToast = useCallback((msg,type="success")=>{ clearTimeout(toastTimer.current); setToast({msg,type}); toastTimer.current=setTimeout(()=>setToast(null),2500); },[]);
+  const showToast = useCallback((msg,type="success",action=null)=>{ clearTimeout(toastTimer.current); setToast({msg,type,action}); toastTimer.current=setTimeout(()=>setToast(null),action?4000:2500); },[]);
 
   // User-action wrappers: mark change as user-initiated so the debounced save fires
   const txSet = useCallback(fn=>{ skipSaveRef.current=false; lastUserActionAt.current=Date.now(); setTransactions(fn); },[]);
@@ -1515,6 +1543,7 @@ export default function App() {
           <span style={{ fontSize:10, color:C.muted, marginLeft:2 }}>▾</span>
         </button>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div title={isSyncing?"Guardando...":"Sincronizado"} style={{ width:7, height:7, borderRadius:"50%", background:isSyncing?"#f59e0b":"#22c55e", flexShrink:0, transition:"background 0.5s" }} />
           {lastBackup && <div style={{ fontSize:10, color:C.muted, textAlign:"right" }}>backup<br/>{new Date(lastBackup).toLocaleDateString("es-AR",{day:"2-digit",month:"short"})}</div>}
           <div style={{ fontSize:11, fontWeight:700, color:balance>=0?"#4ade80":"#f87171", fontFamily:C.mono, background:(balance>=0?"#4ade80":"#f87171")+"22", border:`1px solid ${(balance>=0?"#4ade80":"#f87171")+"44"}`, padding:"6px 12px", borderRadius:20 }}>
             {balance>=0?"+":""}{fmt(balance)}
@@ -1524,8 +1553,8 @@ export default function App() {
 
       {/* Content */}
       <div style={{ flex:1, paddingTop:"16px", paddingLeft:"16px", paddingRight:"16px", paddingBottom:"calc(80px + env(safe-area-inset-bottom))", overflowY:"auto" }}>
-        {activeTab==="home"     && <HomeTab inputRef={inputRef} input={input} setInput={setInput} onSubmit={onSubmit} parsePreview={parsePreview} forceType={forceType} setForceType={setForceType} pendingPriority={pendingPriority} setPendingPriority={setPendingPriority} pendingNote={pendingNote} setPendingNote={setPendingNote} transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} todayExp={todayExp} monthExp={monthExp} monthInc={monthInc} balance={balance} totalFixed={totalFixed} disponible={disponible} projected={projected} daysInMonth={daysInMonth} dayOfMonth={dayOfMonth} showEomBanner={showEomBanner} onExportBackup={handleExport} onDismissBanner={handleDismiss} budgets={budgets} />}
-        {activeTab==="history"  && <HistoryTab transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} period={period} setPeriod={setPeriod} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} />}
+        {activeTab==="home"     && <HomeTab inputRef={inputRef} input={input} setInput={setInput} onSubmit={onSubmit} parsePreview={parsePreview} forceType={forceType} setForceType={setForceType} pendingPriority={pendingPriority} setPendingPriority={setPendingPriority} pendingNote={pendingNote} setPendingNote={setPendingNote} transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} todayExp={todayExp} monthExp={monthExp} monthInc={monthInc} balance={balance} totalFixed={totalFixed} disponible={disponible} projected={projected} daysInMonth={daysInMonth} dayOfMonth={dayOfMonth} showEomBanner={showEomBanner} onExportBackup={handleExport} onDismissBanner={handleDismiss} budgets={budgets} showToast={showToast} />}
+        {activeTab==="history"  && <HistoryTab transactions={transactions} setTransactions={txSet} setEditTx={setEditTx} period={period} setPeriod={setPeriod} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} showToast={showToast} />}
         {activeTab==="fixed"    && <FixedTab fixedExpenses={fixedExpenses} setFixedExpenses={fxSet} totalFixed={totalFixed} monthInc={monthInc} showToast={showToast} />}
         {activeTab==="budgets"  && <BudgetsTab budgets={budgets} setBudgets={bgSet} transactions={transactions} showToast={showToast} />}
         {activeTab==="insights" && <InsightsTab transactions={transactions} monthExp={monthExp} monthInc={monthInc} catBreakdown={catBreakdown} projected={projected} dayOfMonth={dayOfMonth} daysInMonth={daysInMonth} />}
@@ -1543,7 +1572,12 @@ export default function App() {
       </div>
 
       {/* Toast */}
-      {toast && <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
+      {toast && (
+        <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:toast.action?"auto":"none", whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:12 }}>
+          <span>{toast.msg}</span>
+          {toast.action && <button onClick={()=>{ toast.action.fn(); clearTimeout(toastTimer.current); setToast(null); }} style={{ background:"none", border:"1px solid currentColor", borderRadius:6, padding:"2px 10px", color:"inherit", cursor:"pointer", fontSize:12, fontWeight:700, flexShrink:0 }}>{toast.action.label}</button>}
+        </div>
+      )}
 
       {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} onLeave={handleLeaveWs} userId={user.id} sharedWsIds={sharedWsIds} />}
       {editTx && <EditModal tx={editTx} onSave={tx=>{txSet(p=>p.map(t=>t.id===tx.id?{...tx,editedBy:user.email,editedAt:new Date().toISOString()}:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
