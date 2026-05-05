@@ -1081,7 +1081,8 @@ export default function App() {
   const [loadingAuth, setLoadingAuth]= useState(true);
   const syncReady   = useRef(false); // true after Supabase data loaded; prevents saving stale data
   const wsLoadRef   = useRef(null);  // tracks which workspace is being loaded to discard stale responses
-  const skipSaveRef = useRef(false); // true when state was set by realtime (not user) — prevents echo loop
+  const skipSaveRef      = useRef(false); // true when state was set by DB/realtime — prevents echo saves
+  const lastUserActionAt = useRef(0);     // timestamp of last user-initiated data change
 
   // ── App state ─────────────────────────────────────────────────────────────
   const [workspaces,  setWorkspaces]  = useState(()=>load(SK_GLOBAL.workspaces, DEFAULT_WORKSPACES));
@@ -1237,6 +1238,8 @@ export default function App() {
         const ownerUid = wsOwnersRef.current[activeWsId] ?? user.id;
         if (payload.new.user_id !== ownerUid) return;
         if (payload.new.updated_at === payload.old?.updated_at) return;
+        // If user made a change in the last 3s, their save takes priority — ignore realtime
+        if (Date.now() - lastUserActionAt.current < 3000) return;
         const d = payload.new;
         skipSaveRef.current = true; // data came from DB — don't echo it back
         setTransactions(d.transactions || []);
@@ -1269,11 +1272,11 @@ export default function App() {
       if (wsLoadRef.current !== target) return; // stale response, discard
 
       if (data) {
+        skipSaveRef.current = true; // data came from DB — don't save it back
         setTransactions(data.transactions || []);
         setFixedExpenses(data.fixed_expenses || DEFAULT_FX);
         setBudgets(data.budgets || {});
         setLastBackupRaw(data.last_backup);
-        // Keep localStorage cache in sync
         saveWs(target, "tx",         data.transactions   || []);
         saveWs(target, "fx",         data.fixed_expenses || DEFAULT_FX);
         saveWs(target, "budgets",    data.budgets        || {});
@@ -1296,6 +1299,7 @@ export default function App() {
         .eq("user_id", ownerUid).eq("workspace_id", target).maybeSingle();
       if (wsLoadRef.current !== target) return;
       if (data) {
+        skipSaveRef.current = true; // data came from DB — don't save it back
         setTransactions(data.transactions || []);
         setFixedExpenses(data.fixed_expenses || DEFAULT_FX);
         setBudgets(data.budgets || {});
@@ -1370,10 +1374,10 @@ export default function App() {
   const toastTimer = useRef(null);
   const showToast = useCallback((msg,type="success")=>{ clearTimeout(toastTimer.current); setToast({msg,type}); toastTimer.current=setTimeout(()=>setToast(null),2500); },[]);
 
-  // User-action wrappers: reset skipSaveRef so the debounced save fires after real changes
-  const txSet = useCallback(fn=>{ skipSaveRef.current=false; setTransactions(fn); },[]);
-  const fxSet = useCallback(fn=>{ skipSaveRef.current=false; setFixedExpenses(fn); },[]);
-  const bgSet = useCallback(fn=>{ skipSaveRef.current=false; setBudgets(fn); },[]);
+  // User-action wrappers: mark change as user-initiated so the debounced save fires
+  const txSet = useCallback(fn=>{ skipSaveRef.current=false; lastUserActionAt.current=Date.now(); setTransactions(fn); },[]);
+  const fxSet = useCallback(fn=>{ skipSaveRef.current=false; lastUserActionAt.current=Date.now(); setFixedExpenses(fn); },[]);
+  const bgSet = useCallback(fn=>{ skipSaveRef.current=false; lastUserActionAt.current=Date.now(); setBudgets(fn); },[]);
 
   const onSubmit = useCallback(()=>{
     if (!input.trim()) return;
