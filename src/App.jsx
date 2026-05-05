@@ -1400,18 +1400,18 @@ export default function App() {
       if (!syncReady.current) return;
       if (skipSaveRef.current) { skipSaveRef.current = false; return; } // realtime echo — skip
       setIsSyncing(true);
-      const { error } = await supabase.from("workspace_data").upsert(
-        {
-          workspace_id: activeWsId,
-          user_id:      wsOwnersRef.current[activeWsId] ?? user.id,
-          transactions,
-          fixed_expenses: fixedExpenses,
-          budgets,
-          last_backup:  lastBackup,
-          updated_at:   new Date().toISOString(),
-        },
-        { onConflict:"workspace_id,user_id" }
-      );
+      const ownerId  = wsOwnersRef.current[activeWsId] ?? user.id;
+      const isOwner  = ownerId === user.id;
+      const payload  = { transactions, fixed_expenses:fixedExpenses, budgets, last_backup:lastBackup, updated_at:new Date().toISOString() };
+      const { error } = isOwner
+        // Owner: INSERT or UPDATE their own row
+        ? await supabase.from("workspace_data").upsert(
+            { workspace_id:activeWsId, user_id:user.id, ...payload },
+            { onConflict:"workspace_id,user_id" }
+          )
+        // Member: only UPDATE owner's row (RLS blocks INSERT for members)
+        : await supabase.from("workspace_data").update(payload)
+            .eq("workspace_id", activeWsId).eq("user_id", ownerId);
       if (error) console.error("Sync error:", error);
       setIsSyncing(false);
     }, 1500);
