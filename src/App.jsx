@@ -101,8 +101,7 @@ function parseInput(raw, forceType=null) {
 const fmt      = n => new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}).format(n);
 const fmtDate  = iso => new Date(iso).toLocaleDateString("es-AR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
 const fmtShort = iso => new Date(iso).toLocaleDateString("es-AR",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-let _todayStr  = new Date().toDateString();
-const isToday     = iso => new Date(iso).toDateString()===_todayStr;
+const isToday     = iso => new Date(iso).toDateString()===new Date().toDateString();
 const isThisMonth = iso => { const d=new Date(iso),now=new Date(); return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear(); };
 const isThisWeek  = iso => { const d=new Date(iso),now=new Date(),s=new Date(now); s.setDate(now.getDate()-now.getDay()); s.setHours(0,0,0,0); return d>=s; };
 const byPeriod    = (txs,p) => {
@@ -176,7 +175,7 @@ function LoginScreen() {
   const submit = mode==="magic" ? handleMagicLink : mode==="signup" ? handleSignUp : handleSignIn;
 
   return (
-    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:C.font, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 20px", maxWidth:480, margin:"0 auto" }}>
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:C.font, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", paddingTop:"calc(24px + env(safe-area-inset-top))", paddingBottom:"calc(24px + env(safe-area-inset-bottom))", paddingLeft:"20px", paddingRight:"20px", maxWidth:480, margin:"0 auto" }}>
       <div style={{ fontSize:44, marginBottom:10 }}>💸</div>
       <div style={{ fontSize:24, fontWeight:900, letterSpacing:"-0.03em", marginBottom:4 }}>Finanzas</div>
       <div style={{ fontSize:13, color:C.muted, marginBottom:36 }}>Iniciá sesión para acceder a tus datos</div>
@@ -272,7 +271,7 @@ const TxItem = React.memo(function TxItem({ tx, onDelete, onEdit }) {
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onClick={()=>{ if(!swiping) setShowNote(p=>!p); }}
-        style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 0", borderBottom:`1px solid ${C.border}`, cursor:"pointer", position:"relative", background:C.bg, transform:`translateX(${swipeX}px)`, transition:swiping?"none":"transform 0.25s ease", willChange:"transform" }}
+        style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 0", borderBottom:`1px solid ${C.border}`, cursor:"pointer", position:"relative", background:C.bg, transform:`translateX(${swipeX}px)`, transition:swiping?"none":"transform 0.25s ease", willChange:"transform", touchAction:"pan-y" }}
       >
         <div style={{ width:38, height:38, borderRadius:10, background:cat.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{cat.icon}</div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -307,7 +306,7 @@ function EditModal({ tx, onSave, onClose }) {
   const [form, setForm] = useState({...tx, note:tx.note||""});
   return (
     <div style={{ position:"fixed", inset:0, background:"#00000088", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={onClose}>
-      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, width:"100%", maxWidth:480, maxHeight:"90vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, paddingBottom:"calc(20px + env(safe-area-inset-bottom))", width:"100%", maxWidth:480, maxHeight:"90vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
         <div style={{ fontSize:14, fontWeight:700, color:C.text, marginBottom:16 }}>Editar movimiento</div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           <input value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Descripción" style={IINPUT} />
@@ -393,7 +392,7 @@ function WorkspaceModal({ workspaces, activeId, onSelect, onClose, onCreate, onD
   };
   return (
     <div style={{ position:"fixed", inset:0, background:"#00000099", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={onClose}>
-      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, width:"100%", maxWidth:480, maxHeight:"80vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+      <div style={{ background:C.surface, borderRadius:"20px 20px 0 0", border:`1px solid ${C.border}`, padding:20, paddingBottom:"calc(20px + env(safe-area-inset-bottom))", width:"100%", maxWidth:480, maxHeight:"80vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
           <div style={{ fontSize:15, fontWeight:800, color:C.text }}>Mis economías</div>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:C.muted, fontSize:20 }}>×</button>
@@ -806,9 +805,11 @@ function FixedTab({ fixedExpenses, setFixedExpenses, totalFixed, monthInc, showT
 // ─── TAB: INSIGHTS ───────────────────────────────────────────────────────────
 function InsightsTab({ transactions, monthExp, monthInc, catBreakdown, projected, dayOfMonth, daysInMonth }) {
   const maxCat = catBreakdown[0]?.[1]??1;
-  const lastMonthTotal = useMemo(()=>
-    transactions.filter(t=>{ const d=new Date(t.date),now=new Date(); return d.getMonth()===(now.getMonth()-1+12)%12&&d.getFullYear()===now.getFullYear()&&t.type==="expense"; }).reduce((s,t)=>s+t.amount,0)
-  ,[transactions]);
+  const lastMonthTotal = useMemo(()=>{
+    const ref=new Date(); ref.setDate(1); ref.setMonth(ref.getMonth()-1);
+    const lm=ref.getMonth(), ly=ref.getFullYear();
+    return transactions.filter(t=>{ const d=new Date(t.date); return t.type==="expense"&&d.getMonth()===lm&&d.getFullYear()===ly; }).reduce((s,t)=>s+t.amount,0);
+  },[transactions]);
   const diff=monthExp-lastMonthTotal, pct=lastMonthTotal>0?Math.round((diff/lastMonthTotal)*100):0;
   const priorityStats = useMemo(()=>{
     const monthTxs=transactions.filter(t=>isThisMonth(t.date)&&t.type==="expense");
