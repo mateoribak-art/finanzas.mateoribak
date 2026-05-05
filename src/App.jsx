@@ -409,6 +409,14 @@ function WorkspaceModal({ workspaces, activeId, onSelect, onClose, onCreate, onD
     const email = inviteEmail.trim().toLowerCase();
     if (!email) return;
     setInviteLoading(true); setInviteMsg(null);
+    // Ensure workspace exists in Supabase before creating the invite
+    const wsToShare = workspaces.find(w => w.id === shareWsId);
+    if (wsToShare) {
+      await supabase.from("workspaces").upsert(
+        { id: wsToShare.id, user_id: userId, name: wsToShare.name, emoji: wsToShare.emoji, created_at: wsToShare.createdAt },
+        { onConflict: "id,user_id" }
+      );
+    }
     const { error } = await supabase.from("workspace_members").upsert(
       { workspace_id: shareWsId, owner_user_id: userId, invited_email: email },
       { onConflict: "workspace_id,owner_user_id,invited_email" }
@@ -1267,7 +1275,7 @@ export default function App() {
 
   // ── Sync workspace list to Supabase (only own workspaces) ────────────────
   useEffect(()=>{
-    if (!user || !syncReady.current) return;
+    if (!user) return;
     workspaces.filter(ws=>!sharedWsIdsRef.current.has(ws.id)).forEach(ws=>{
       supabase.from("workspaces").upsert(
         { id:ws.id, user_id:user.id, name:ws.name, emoji:ws.emoji, created_at:ws.createdAt },
