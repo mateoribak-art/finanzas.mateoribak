@@ -416,7 +416,22 @@ function WorkspaceModal({ workspaces, activeId, onSelect, onClose, onCreate, onD
     if (error) {
       setInviteMsg({ text:"Error al invitar. Intentá de nuevo.", type:"error" });
     } else {
-      setInviteMsg({ text:`✅ Invitación enviada a ${email}. Cuando inicie sesión va a ver el workspace automáticamente.`, type:"success" });
+      const ws = workspaces.find(w => w.id === shareWsId);
+      const wsLabel = `${ws?.emoji ? ws.emoji + " " : ""}${ws?.name || ""}`;
+      const appUrl = import.meta.env.VITE_APP_URL || "https://finanzas-mateoribak.vercel.app";
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_RESEND_API_KEY}` },
+          body: JSON.stringify({
+            from: "Finanzas <hola@unocincoytres.com>",
+            to: [email],
+            subject: `Te compartieron el workspace "${wsLabel}"`,
+            html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#08080f;color:#e2e8f0;border-radius:12px"><h2 style="margin-top:0;color:#a78bfa">Workspace compartido</h2><p>Te invitaron a colaborar en <strong style="color:#e2e8f0">${wsLabel}</strong>.</p><p>Ingresá con tu email <strong>${email}</strong> y el workspace va a aparecer automáticamente en la barra lateral.</p><a href="${appUrl}" style="display:inline-block;background:#1e3a5f;color:#93c5fd;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:8px">Abrir Finanzas →</a></div>`
+          })
+        });
+      } catch (_) {}
+      setInviteMsg({ text:`✅ Invitación enviada a ${email}.`, type:"success" });
       setInviteEmail("");
       await reloadMembers();
     }
@@ -1139,6 +1154,39 @@ export default function App() {
       setWsOwners(owners);
       setSharedWsIds(sharedIds);
     })();
+  },[user]);
+
+  // ── Realtime: detect new workspace invites while logged in ────────────────
+  useEffect(()=>{
+    if (!user) return;
+    const channel = supabase
+      .channel(`invites-${user.id}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "workspace_members",
+        filter: `invited_email=eq.${user.email}`
+      }, async (payload) => {
+        const { id: rowId, workspace_id, owner_user_id } = payload.new;
+        if (sharedWsIdsRef.current.has(workspace_id)) return;
+        await supabase.from("workspace_members").update({ member_user_id: user.id }).eq("id", rowId);
+        const { data: wsData } = await supabase.from("workspaces").select("*")
+          .eq("id", workspace_id).eq("user_id", owner_user_id).maybeSingle();
+        if (!wsData) return;
+        const newWs = { id: wsData.id, name: wsData.name, emoji: wsData.emoji, createdAt: wsData.created_at };
+        setWorkspaces(p => {
+          if (p.some(w => w.id === newWs.id)) return p;
+          const updated = [...p, newWs];
+          save(SK_GLOBAL.workspaces, updated);
+          return updated;
+        });
+        wsOwnersRef.current[workspace_id] = owner_user_id;
+        sharedWsIdsRef.current.add(workspace_id);
+        setWsOwners(p => ({ ...p, [workspace_id]: owner_user_id }));
+        setSharedWsIds(p => { const n = new Set(p); n.add(workspace_id); return n; });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   },[user]);
 
   // ── Load workspace data from Supabase when user or workspace changes ──────
