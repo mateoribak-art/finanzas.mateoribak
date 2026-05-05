@@ -88,13 +88,13 @@ function parseInput(raw, forceType=null) {
   if (!text) return null;
   const nums = text.match(/\d[\d.,]*/g);
   if (!nums) return null;
-  const raw = nums[nums.length-1];
+  const numStr = nums[nums.length-1];
   // Detect format: if last separator is "," treat as AR (1.500,50); if "." treat as decimal (1500.50)
-  const lastComma = raw.lastIndexOf(","), lastDot = raw.lastIndexOf(".");
+  const lastComma = numStr.lastIndexOf(","), lastDot = numStr.lastIndexOf(".");
   const amount = parseFloat(
     lastComma > lastDot
-      ? raw.replace(/\./g,"").replace(",",".")   // AR format: 1.500,50 → 1500.50
-      : raw.replace(/,/g,"")                     // plain or decimal dot: 1500.50 → 1500.50
+      ? numStr.replace(/\./g,"").replace(",",".")   // AR format: 1.500,50 → 1500.50
+      : numStr.replace(/,/g,"")                     // plain or decimal dot: 1500.50 → 1500.50
   );
   if (!amount||amount<=0) return null;
   const lc = text.toLowerCase();
