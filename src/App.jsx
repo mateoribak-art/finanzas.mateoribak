@@ -1186,7 +1186,7 @@ export default function App() {
     <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:C.font, display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
 
       {/* Header */}
-      <div style={{ padding:"16px 16px 10px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${C.border}`, position:"sticky", top:0, background:C.bg, zIndex:50 }}>
+      <div style={{ paddingTop:"calc(16px + env(safe-area-inset-top))", paddingBottom:"10px", paddingLeft:"16px", paddingRight:"16px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${C.border}`, position:"sticky", top:0, background:C.bg, zIndex:50 }}>
         <button onClick={()=>setShowWsModal(true)} style={{ display:"flex", alignItems:"center", gap:8, background:"none", border:"none", cursor:"pointer", padding:0 }}>
           <div style={{ width:32, height:32, borderRadius:10, background:C.surface2, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>{activeWs.emoji}</div>
           <div style={{ textAlign:"left" }}>
@@ -1204,7 +1204,7 @@ export default function App() {
       </div>
 
       {/* Content */}
-      <div style={{ flex:1, padding:"16px 16px 80px", overflowY:"auto" }}>
+      <div style={{ flex:1, paddingTop:"16px", paddingLeft:"16px", paddingRight:"16px", paddingBottom:"calc(80px + env(safe-area-inset-bottom))", overflowY:"auto" }}>
         {activeTab==="home"     && <HomeTab inputRef={inputRef} input={input} setInput={setInput} onSubmit={onSubmit} parsePreview={parsePreview} forceType={forceType} setForceType={setForceType} pendingPriority={pendingPriority} setPendingPriority={setPendingPriority} pendingNote={pendingNote} setPendingNote={setPendingNote} transactions={transactions} setTransactions={setTransactions} setEditTx={setEditTx} todayExp={todayExp} monthExp={monthExp} monthInc={monthInc} balance={balance} totalFixed={totalFixed} disponible={disponible} projected={projected} daysInMonth={daysInMonth} dayOfMonth={dayOfMonth} showEomBanner={showEomBanner} onExportBackup={handleExport} onDismissBanner={handleDismiss} budgets={budgets} />}
         {activeTab==="history"  && <HistoryTab transactions={transactions} setTransactions={setTransactions} setEditTx={setEditTx} period={period} setPeriod={setPeriod} filterCat={filterCat} setFilterCat={setFilterCat} filtered={filtered} />}
         {activeTab==="fixed"    && <FixedTab fixedExpenses={fixedExpenses} setFixedExpenses={setFixedExpenses} totalFixed={totalFixed} monthInc={monthInc} showToast={showToast} />}
@@ -1214,7 +1214,7 @@ export default function App() {
       </div>
 
       {/* Bottom nav */}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:C.surface, borderTop:`1px solid ${C.border}`, display:"flex", zIndex:100 }}>
+      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:C.surface, borderTop:`1px solid ${C.border}`, display:"flex", zIndex:100, paddingBottom:"env(safe-area-inset-bottom)" }}>
         {TABS.map(([id,icon])=>(
           <button key={id} onClick={()=>setActiveTab(id)} style={{ flex:1, padding:"10px 0", background:"none", border:"none", cursor:"pointer", fontSize:16, opacity:activeTab===id?1:0.35, transition:"opacity 0.15s", position:"relative" }}>
             {icon}
@@ -1224,7 +1224,7 @@ export default function App() {
       </div>
 
       {/* Toast */}
-      {toast && <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
+      {toast && <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
 
       {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} />}
       {editTx && <EditModal tx={editTx} onSave={tx=>{setTransactions(p=>p.map(t=>t.id===tx.id?tx:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
