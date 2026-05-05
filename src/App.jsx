@@ -281,6 +281,8 @@ const TxItem = React.memo(function TxItem({ tx, onDelete, onEdit }) {
             <span style={{ fontSize:10, fontWeight:600, color:cat.color, background:cat.color+"22", border:`1px solid ${cat.color}44`, borderRadius:4, padding:"1px 5px", textTransform:"uppercase" }}>{cat.label}</span>
             {tx.priority && <span>{PRIORITY[tx.priority]?.emoji}</span>}
             {tx.note && <span style={{ color:"#a78bfa", fontSize:10 }}>📝</span>}
+            {tx.createdBy && <span style={{ color:C.muted, fontSize:10 }}>👤 {tx.createdBy.split("@")[0]}</span>}
+            {tx.editedBy && <span style={{ color:"#6b7280", fontSize:10 }}>✏️ {tx.editedBy.split("@")[0]}</span>}
           </div>
           {showNote && tx.note && (
             <div style={{ marginTop:6, fontSize:12, color:"#c4b5fd", background:"#1a0a2e", borderRadius:8, padding:"6px 10px", fontStyle:"italic" }}>
@@ -1261,7 +1263,7 @@ export default function App() {
     if (!input.trim()) return;
     const tx = parseInput(input,forceType);
     if (!tx) { showToast("No pude detectar el monto. Ej: 'uber 3500'","error"); return; }
-    const final = { ...tx, ...(tx.type==="expense"?{priority:pendingPriority||null}:{}), ...(pendingNote.trim()?{note:pendingNote.trim()}:{}) };
+    const final = { ...tx, ...(tx.type==="expense"?{priority:pendingPriority||null}:{}), ...(pendingNote.trim()?{note:pendingNote.trim()}:{}), createdBy:user.email };
     setTransactions(p=>[final,...p]);
     setInput(""); setForceType(null); setPendingPriority(null); setPendingNote("");
     showToast(final.type==="income"?`✅ Ingreso: ${fmt(final.amount)}`:`✅ Gasto: ${fmt(final.amount)}`);
@@ -1397,7 +1399,7 @@ export default function App() {
       {toast && <div style={{ position:"fixed", bottom:"calc(80px + env(safe-area-inset-bottom))", left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?"#7f1d1d":"#14532d", color:toast.type==="error"?"#fca5a5":"#86efac", border:`1px solid ${toast.type==="error"?"#ef444444":"#22c55e44"}`, borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>{toast.msg}</div>}
 
       {showWsModal && <WorkspaceModal workspaces={workspaces} activeId={activeWsId} onSelect={setActiveWsId} onClose={()=>setShowWsModal(false)} onCreate={handleCreateWs} onDelete={handleDeleteWs} onLeave={handleLeaveWs} userId={user.id} sharedWsIds={sharedWsIds} />}
-      {editTx && <EditModal tx={editTx} onSave={tx=>{setTransactions(p=>p.map(t=>t.id===tx.id?tx:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
+      {editTx && <EditModal tx={editTx} onSave={tx=>{setTransactions(p=>p.map(t=>t.id===tx.id?{...tx,editedBy:user.email,editedAt:new Date().toISOString()}:t));setEditTx(null);showToast("✅ Actualizado");}} onClose={()=>setEditTx(null)} />}
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap');
