@@ -1161,6 +1161,24 @@ export default function App() {
       sharedWsIdsRef.current = sharedIds;
       setWsOwners(owners);
       setSharedWsIds(sharedIds);
+
+      // Bootstrap: upload localStorage data for any own workspace not yet in DB
+      const ownIds = all.filter(w => !sharedIds.has(w.id)).map(w => w.id);
+      if (ownIds.length) {
+        const { data: existing } = await supabase
+          .from("workspace_data").select("workspace_id")
+          .in("workspace_id", ownIds).eq("user_id", user.id);
+        const inDB = new Set(existing?.map(d => d.workspace_id) || []);
+        for (const ws of all.filter(w => !sharedIds.has(w.id) && !inDB.has(w.id))) {
+          await supabase.from("workspace_data").upsert(
+            { workspace_id: ws.id, user_id: user.id,
+              transactions:   loadWs(ws.id, "tx",      []),
+              fixed_expenses: loadWs(ws.id, "fx",      DEFAULT_FX),
+              budgets:        loadWs(ws.id, "budgets", {}) },
+            { onConflict: "workspace_id,user_id" }
+          );
+        }
+      }
     })();
   },[user]);
 
@@ -1225,15 +1243,6 @@ export default function App() {
         saveWs(target, "fx",         data.fixed_expenses || DEFAULT_FX);
         saveWs(target, "budgets",    data.budgets        || {});
         saveWs(target, "lastBackup", data.last_backup);
-      } else if (ownerUid === user.id) {
-        // No DB data yet — bootstrap from localStorage so other devices/collaborators can load it
-        const localTx      = loadWs(target, "tx",      []);
-        const localFx      = loadWs(target, "fx",      DEFAULT_FX);
-        const localBudgets = loadWs(target, "budgets", {});
-        await supabase.from("workspace_data").upsert(
-          { workspace_id: target, user_id: ownerUid, transactions: localTx, fixed_expenses: localFx, budgets: localBudgets },
-          { onConflict: "workspace_id,user_id" }
-        );
       }
 
       syncReady.current = true;
