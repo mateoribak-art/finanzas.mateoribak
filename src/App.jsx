@@ -1215,6 +1215,32 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   },[user]);
 
+  // ── Realtime: sync workspace data changes from other users ───────────────
+  useEffect(()=>{
+    if (!user || !activeWsId) return;
+    const ownerUid = wsOwnersRef.current[activeWsId] ?? user.id;
+    const channel = supabase
+      .channel(`wsdata-${activeWsId}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "workspace_data",
+        filter: `workspace_id=eq.${activeWsId}`
+      }, (payload) => {
+        if (payload.new.user_id !== ownerUid) return;
+        if (payload.new.updated_at === payload.old?.updated_at) return;
+        const d = payload.new;
+        setTransactions(d.transactions || []);
+        setFixedExpenses(d.fixed_expenses || DEFAULT_FX);
+        setBudgets(d.budgets || {});
+        saveWs(activeWsId, "tx",      d.transactions    || []);
+        saveWs(activeWsId, "fx",      d.fixed_expenses  || DEFAULT_FX);
+        saveWs(activeWsId, "budgets", d.budgets         || {});
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  },[user, activeWsId, wsOwners]);
+
   // ── Load workspace data from Supabase when user or workspace changes ──────
   useEffect(()=>{
     if (!user) return;
